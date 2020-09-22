@@ -954,9 +954,16 @@ class WP_Import extends WP_Importer {
 			$menu_id = is_array( $menu_id ) ? $menu_id['term_id'] : $menu_id;
 		}
 
+
+		// Create an array to store all the post meta in
+		$menu_item_meta = array();
+
 		foreach ( $item['postmeta'] as $meta ) {
 			${$meta['key']} = $meta['value'];
+			$menu_item_meta[$meta['key']] = $meta['value'];
 		}
+
+		printf("attempting to importing '%s' item type with id %d - %s \n", $_menu_item_type , $item['post_id'], $item['post_title']);
 
 		if ( 'taxonomy' == $_menu_item_type && isset( $this->processed_terms[ intval( $_menu_item_object_id ) ] ) ) {
 			$_menu_item_object_id = $this->processed_terms[ intval( $_menu_item_object_id ) ];
@@ -964,8 +971,10 @@ class WP_Import extends WP_Importer {
 			$_menu_item_object_id = $this->processed_posts[ intval( $_menu_item_object_id ) ];
 		} elseif ( 'custom' != $_menu_item_type ) {
 			// associated object is missing or not imported yet, we'll retry later
-			$this->missing_menu_items[] = $item;
-			return;
+			// printf( __( "associated object is missing or not imported yet:\n%s\n", 'wordpress-importer' ), json_encode($item) );
+			// $this->missing_menu_items[] = $item;
+			// we don't actu
+			// return;
 		}
 
 		if ( isset( $this->processed_menu_items[ intval( $_menu_item_menu_item_parent ) ] ) ) {
@@ -999,7 +1008,31 @@ class WP_Import extends WP_Importer {
 
 		$id = wp_update_nav_menu_item( $menu_id, 0, $args );
 		if ( $id && ! is_wp_error( $id ) ) {
+
+			update_post_meta((int) $id, '_import_original_id', $item['post_id']);
 			$this->processed_menu_items[ intval( $item['post_id'] ) ] = (int) $id;
+
+			// Add Custom Meta not already covered by $args
+
+			// Remove all default $args from $menu_item_meta array
+			foreach ( $args as $a => $arg ) {
+				unset( $menu_item_meta[ '_' . str_replace('-', '_', $a) ]);
+			}
+			// For some reason this doesn't follow the same naming convention so manually unset
+			unset ( $menu_item_meta['_menu_item_menu_item_parent'] );
+
+			$menu_item_meta = array_diff_assoc( $menu_item_meta, $args );
+
+			printf( __( "imported. about to import postmeta for id %d : %s\n", 'wordpress-importer' ), esc_html($id),  json_encode($menu_item_meta) );
+			// update any other post meta
+			if (!empty($menu_item_meta)) {
+				foreach ($menu_item_meta as $key => $value) {
+					update_post_meta((int) $id, $key, maybe_unserialize($value));
+				}
+			}
+
+		} else {
+			printf("\nerror: %d :  %s\n", $menu_id, json_encode([$item, $args]));
 		}
 	}
 
@@ -1076,7 +1109,7 @@ class WP_Import extends WP_Importer {
 		}
 
 		// Fetch the remote URL and write it to the placeholder file.
-		$remote_response = wp_safe_remote_get(
+		$remote_response = wp_remote_get(
 			$url,
 			array(
 				'timeout'  => 300,
